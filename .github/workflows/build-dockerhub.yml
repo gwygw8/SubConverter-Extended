@@ -182,7 +182,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=subconverter
 
   build-arm64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm  # 使用原生 ARM64 Runner，避免 QEMU 模拟
     needs: prepare
     if: needs.prepare.outputs.is_release == 'true'
     outputs:
@@ -193,9 +193,6 @@ jobs:
         with:
           token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0  # Fetch all history for proper git operations
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
