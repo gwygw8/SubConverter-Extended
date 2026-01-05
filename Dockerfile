@@ -138,10 +138,15 @@ RUN set -xe && \
 # ========== FINAL STAGE ==========
 FROM alpine:latest
 
-# 安装运行时依赖 (Alpine 使用 musl libc)
-# 注意：不使用 strip，因为 Go CGO 程序被 strip 后会导致 Segfault
+# 安装 glibc 兼容层（解决 Go CGO 与 musl 不兼容导致的 Segfault 问题）
+# 使用 sgerrand 的 glibc 包提供 glibc 运行时支持
 RUN apk add --no-cache \
-    libstdc++ pcre2 libcurl yaml-cpp ca-certificates
+    libstdc++ pcre2 libcurl yaml-cpp ca-certificates wget && \
+    wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub && \
+    wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.35-r1/glibc-2.35-r1.apk && \
+    apk add --no-cache --force-overwrite glibc-2.35-r1.apk && \
+    rm glibc-2.35-r1.apk && \
+    apk del wget
 
 COPY --from=builder /src/subconverter /usr/bin/subconverter
 COPY --from=builder /src/base /base/

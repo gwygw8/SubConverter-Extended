@@ -36,6 +36,7 @@ RUN go run ../scripts/generate_param_compat.go -o param_compat.h
 
 # Build static library (enable CGO for glibc)
 # 根据目标架构自动配置交叉编译环境
+# 注意：不使用 -ldflags="-s -w"，因为移除符号表会导致 CGO 程序 Segfault
 RUN if [ "$TARGETARCH" = "arm" ] && [ "$TARGETVARIANT" = "v7" ]; then \
     echo "==> Cross-compiling for ARMv7 (native ARM64 build)" && \
     export CGO_ENABLED=1 \
@@ -49,7 +50,6 @@ RUN if [ "$TARGETARCH" = "arm" ] && [ "$TARGETVARIANT" = "v7" ]; then \
     fi && \
     go build \
     -buildmode=c-archive \
-    -ldflags="-s -w" \
     -o libmihomo.a \
     .
 
@@ -157,12 +157,15 @@ RUN apt-get update && \
     libpcre2-8-0 libcurl4 libyaml-cpp0.7 ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/subconverter /usr/bin/
+COPY --from=builder /src/subconverter /usr/bin/subconverter
 COPY --from=builder /src/base /base/
+
+# 确保二进制可执行
+RUN chmod +x /usr/bin/subconverter
 
 ENV TZ=Africa/Abidjan
 RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /base
-CMD ["subconverter"]
+CMD ["/usr/bin/subconverter"]
 EXPOSE 25500/tcp
