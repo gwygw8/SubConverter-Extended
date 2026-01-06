@@ -193,5 +193,18 @@ ENV LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/lib64:/usr
 RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /base
-CMD ["/usr/bin/subconverter"]
+RUN set -e && \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      'set -e' \
+      'CONF="${PREF_PATH:-/base/pref.toml}"' \
+      'CONF_DIR="$(dirname "$CONF")"' \
+      'mkdir -p "$CONF_DIR"' \
+      'if [ ! -f "$CONF" ] && [ -f /base/pref.example.toml ]; then' \
+      '  cp /base/pref.example.toml "$CONF"' \
+      'fi' \
+      'exec /usr/bin/subconverter -f "$CONF"' \
+      > /usr/local/bin/start-subconverter && \
+    chmod +x /usr/local/bin/start-subconverter
+CMD ["/usr/local/bin/start-subconverter"]
 EXPOSE 25500/tcp
