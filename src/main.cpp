@@ -168,8 +168,29 @@ int main(int argc, char *argv[]) {
       [](RESPONSE_CALLBACK_ARGS) -> std::string {
         std::string build_id = BUILD_ID;
         std::string build_date = BUILD_DATE;
-        std::string build_date_display =
-            build_date.empty() ? "unknown" : build_date;
+        auto format_build_date = [](const std::string &value) -> std::string {
+          if (value.empty())
+            return "unknown";
+          size_t split_pos = value.find('T');
+          if (split_pos == std::string::npos)
+            split_pos = value.find(' ');
+          std::string candidate =
+              split_pos == std::string::npos ? value : value.substr(0, split_pos);
+          if (candidate.size() >= 10 && candidate[4] == '-' &&
+              candidate[7] == '-' && candidate[0] >= '0' &&
+              candidate[0] <= '9' && candidate[1] >= '0' &&
+              candidate[1] <= '9' && candidate[2] >= '0' &&
+              candidate[2] <= '9' && candidate[3] >= '0' &&
+              candidate[3] <= '9' && candidate[5] >= '0' &&
+              candidate[5] <= '9' && candidate[6] >= '0' &&
+              candidate[6] <= '9' && candidate[8] >= '0' &&
+              candidate[8] <= '9' && candidate[9] >= '0' &&
+              candidate[9] <= '9') {
+            return candidate.substr(0, 10);
+          }
+          return candidate;
+        };
+        std::string build_date_display = format_build_date(build_date);
         std::string commit_link =
             build_id.empty()
                 ? ""
