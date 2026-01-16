@@ -324,6 +324,36 @@ void checkExternalBase(const std::string &path, std::string &dest) {
     dest = path;
 }
 
+static bool hasEffectiveExternalConfig(const ExternalConfig &extconf,
+                                       const template_args &tpl_args,
+                                       const string_map &tpl_args_base) {
+  if (tpl_args.local_vars != tpl_args_base)
+    return true;
+
+  if (!extconf.custom_proxy_group.empty() || !extconf.surge_ruleset.empty())
+    return true;
+
+  if (!extconf.clash_rule_base.empty() || !extconf.surge_rule_base.empty() ||
+      !extconf.surfboard_rule_base.empty() ||
+      !extconf.mellow_rule_base.empty() || !extconf.quan_rule_base.empty() ||
+      !extconf.quanx_rule_base.empty() || !extconf.loon_rule_base.empty() ||
+      !extconf.sssub_rule_base.empty() ||
+      !extconf.singbox_rule_base.empty())
+    return true;
+
+  if (!extconf.rename.empty() || !extconf.emoji.empty() ||
+      !extconf.include.empty() || !extconf.exclude.empty())
+    return true;
+
+  if (!extconf.add_emoji.is_undef() || !extconf.remove_old_emoji.is_undef())
+    return true;
+
+  if (!extconf.enable_rule_generator || extconf.overwrite_original_rules)
+    return true;
+
+  return false;
+}
+
 /**
  * 根据订阅链接生成唯一特征码（MD5 前 6 位，大写）
  * @param url 订阅链接（会自动解码后计算哈希）
@@ -616,6 +646,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   /// load external configuration
   std::string userProvidedConfig = getUrlArg(argument, "config");
   bool configLoadSuccess = false;
+  string_map tpl_args_base = tpl_args.local_vars;
 
   if (argExternalConfig.empty())
     argExternalConfig = global.defaultExtConfig;
@@ -626,7 +657,9 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
              LOG_LEVEL_INFO);
     ExternalConfig extconf;
     extconf.tpl_args = &tpl_args;
-    if (loadExternalConfig(argExternalConfig, extconf) == 0) {
+    int load_result = loadExternalConfig(argExternalConfig, extconf);
+    if (load_result == 0 &&
+        hasEffectiveExternalConfig(extconf, tpl_args, tpl_args_base)) {
       configLoadSuccess = true;
       if (!ext.nodelist) {
         checkExternalBase(extconf.sssub_rule_base, lSSSubBase);
@@ -660,9 +693,20 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
         lExcludeRemarks = extconf.exclude;
       argAddEmoji.define(extconf.add_emoji);
       argRemoveEmoji.define(extconf.remove_old_emoji);
-    } else if (!userProvidedConfig.empty() &&
-               !global.defaultExtConfig.empty() &&
-               argExternalConfig != global.defaultExtConfig) {
+    } else {
+      tpl_args.local_vars = tpl_args_base;
+      if (load_result == 0) {
+        writeLog(
+            0,
+            "External configuration loaded but contains no effective settings. "
+            "Treating as failure.",
+            LOG_LEVEL_WARNING);
+      }
+    }
+
+    if (!configLoadSuccess && !userProvidedConfig.empty() &&
+        !global.defaultExtConfig.empty() &&
+        argExternalConfig != global.defaultExtConfig) {
       // User provided config failed, try multiple fallback CDN URLs
       writeLog(
           0, "Failed to load user provided config, trying fallback configs...",
@@ -672,9 +716,12 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
         writeLog(0, "Attempting to load config from: " + fallbackUrl,
                  LOG_LEVEL_INFO);
 
+        tpl_args.local_vars = tpl_args_base;
         ExternalConfig extconf;
         extconf.tpl_args = &tpl_args;
-        if (loadExternalConfig(fallbackUrl, extconf) == 0) {
+        int fallback_result = loadExternalConfig(fallbackUrl, extconf);
+        if (fallback_result == 0 &&
+            hasEffectiveExternalConfig(extconf, tpl_args, tpl_args_base)) {
           writeLog(0, "Successfully loaded config from: " + fallbackUrl,
                    LOG_LEVEL_INFO);
           configLoadSuccess = true;
@@ -712,8 +759,17 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
           argRemoveEmoji.define(extconf.remove_old_emoji);
           break; // Success, stop trying other URLs
         } else {
-          writeLog(0, "Failed to load config from: " + fallbackUrl,
-                   LOG_LEVEL_WARNING);
+          tpl_args.local_vars = tpl_args_base;
+          if (fallback_result == 0) {
+            writeLog(
+                0,
+                "Loaded config from: " + fallbackUrl +
+                    " but found no effective settings. Skipping.",
+                LOG_LEVEL_WARNING);
+          } else {
+            writeLog(0, "Failed to load config from: " + fallbackUrl,
+                     LOG_LEVEL_WARNING);
+          }
         }
       }
 
