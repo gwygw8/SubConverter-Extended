@@ -4,6 +4,7 @@
 #include <mutex>
 #include <numeric>
 #include <string>
+#include <unordered_set>
 
 #include <inja.hpp>
 #include <yaml-cpp/yaml.h>
@@ -380,62 +381,110 @@ inline std::string generateProviderHashFromDecodedUrl(
 
 struct TaggedLink {
   std::string tag;
+  std::string provider;
   std::string link;
   bool has_tag = false;
+  bool has_provider = false;
   bool link_decoded = false;
 };
 
-static bool extractTagPrefix(const std::string &input, std::string &tag,
-                             std::string &link) {
-  std::string value = trimWhitespace(input, true, true);
+static bool extractLinkPrefix(const std::string &input,
+                              const std::string &prefix,
+                              std::string &value,
+                              std::string &remainder,
+                              bool &saw_bracketed) {
+  std::string trimmed = trimWhitespace(input, true, true);
   size_t start = std::string::npos;
   bool bracketed = false;
-  if (startsWith(value, "<tag:")) {
-    start = 5;
+  std::string bracket_prefix = "<" + prefix;
+  if (startsWith(trimmed, bracket_prefix)) {
+    start = bracket_prefix.size();
     bracketed = true;
-  } else if (startsWith(value, "tag:"))
-    start = 4;
-  else
+  } else if (startsWith(trimmed, prefix)) {
+    start = prefix.size();
+  } else {
     return false;
+  }
 
-  size_t comma_pos = value.find(',', start);
+  size_t comma_pos = trimmed.find(',', start);
   if (comma_pos == std::string::npos)
     return false;
 
-  tag = value.substr(start, comma_pos - start);
+  value = trimmed.substr(start, comma_pos - start);
   size_t link_pos = comma_pos + 1;
-  if (link_pos < value.size() && value[link_pos] == '>')
+  if (bracketed && link_pos < trimmed.size() && trimmed[link_pos] == '>')
     link_pos++;
-  if (tag.empty() || link_pos >= value.size())
+  if (value.empty() || link_pos >= trimmed.size())
     return false;
 
-  link = value.substr(link_pos);
-  if (bracketed && !link.empty() && link.back() == '>')
-    link.pop_back();
+  remainder = trimmed.substr(link_pos);
+  if (bracketed)
+    saw_bracketed = true;
   return true;
 }
 
-static bool looksLikeEncodedTagPrefix(const std::string &input) {
+static bool parseLinkPrefixes(const std::string &input, TaggedLink &result) {
+  std::string remainder = input;
+  bool saw_bracketed = false;
+  bool parsed = false;
+
+  while (true) {
+    std::string value;
+    std::string next;
+    if (extractLinkPrefix(remainder, "tag:", value, next, saw_bracketed)) {
+      parsed = true;
+      if (!result.has_tag) {
+        result.tag = value;
+        result.has_tag = true;
+      }
+      remainder = next;
+      continue;
+    }
+    if (extractLinkPrefix(remainder, "provider:", value, next, saw_bracketed)) {
+      parsed = true;
+      if (!result.has_provider) {
+        result.provider = value;
+        result.has_provider = true;
+      }
+      remainder = next;
+      continue;
+    }
+    break;
+  }
+
+  if (!parsed)
+    return false;
+
+  remainder = trimWhitespace(remainder, true, true);
+  if (saw_bracketed && !remainder.empty() && remainder.back() == '>')
+    remainder.pop_back();
+  result.link = remainder;
+  return true;
+}
+
+static bool looksLikeEncodedLinkPrefix(const std::string &input) {
   std::string lower = toLower(input);
-  return startsWith(lower, "tag%3a") || startsWith(lower, "%3ctag%3a") ||
-         startsWith(lower, "%3ctag:") ||
+  return startsWith(lower, "tag%3a") || startsWith(lower, "provider%3a") ||
+         startsWith(lower, "%3ctag%3a") ||
+         startsWith(lower, "%3cprovider%3a") || startsWith(lower, "%3ctag:") ||
+         startsWith(lower, "%3cprovider:") ||
          (startsWith(lower, "tag:") &&
+          lower.find("%2c") != std::string::npos) ||
+         (startsWith(lower, "provider:") &&
           lower.find("%2c") != std::string::npos);
 }
 
 static TaggedLink parseTaggedLink(const std::string &input) {
   TaggedLink result;
   std::string value = trimWhitespace(input, true, true);
-  if (extractTagPrefix(value, result.tag, result.link)) {
-    result.has_tag = true;
+  if (parseLinkPrefixes(value, result))
     return result;
-  }
-  if (looksLikeEncodedTagPrefix(value)) {
+  if (looksLikeEncodedLinkPrefix(value)) {
+    TaggedLink decoded_result;
     std::string decoded = urlDecode(value);
-    if (extractTagPrefix(decoded, result.tag, result.link)) {
-      result.has_tag = true;
-      result.link_decoded = true;
-      return result;
+    if (parseLinkPrefixes(decoded, decoded_result)) {
+      decoded_result.link_decoded = true;
+      return decoded_result;
     }
   }
   result.link = value;
@@ -884,6 +933,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     struct SubscriptionLinkItem {
       std::string url;
       std::string tag;
+      std::string provider;
       bool url_decoded = false;
     };
     std::vector<SubscriptionLinkItem> subscription_urls; // HTTP/HTTPS 订阅链接
@@ -917,7 +967,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
                    "', will create provider.",
             LOG_LEVEL_INFO);
         subscription_urls.push_back(
-            {link, tagged.tag, tagged.link_decoded});
+            {link, tagged.tag, tagged.provider, tagged.link_decoded});
       } else {
         std::string node_link = link;
         if (tagged.has_tag)
@@ -933,6 +983,18 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
       writeLog(0, "Found subscription URLs, enabling proxy-provider mode.",
                LOG_LEVEL_INFO);
       ext.use_proxy_provider = true;
+      std::unordered_set<std::string> provider_names;
+      auto reserve_provider_name = [&](const std::string &base) {
+        if (provider_names.insert(base).second)
+          return base;
+        int index = 1;
+        while (true) {
+          std::string candidate = base + "_" + std::to_string(index);
+          if (provider_names.insert(candidate).second)
+            return candidate;
+          index++;
+        }
+      };
 
       // 为订阅链接创建 proxy-provider
       for (const SubscriptionLinkItem &item : subscription_urls) {
@@ -943,7 +1005,10 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
         std::string urlHash =
             item.url_decoded ? generateProviderHashFromDecodedUrl(item.url)
                              : generateProviderHash(item.url);
-        provider.name = "Provider_" + urlHash;
+        std::string default_name = "Provider_" + urlHash;
+        std::string base_name =
+            item.provider.empty() ? default_name : item.provider;
+        provider.name = reserve_provider_name(base_name);
         provider.tag = item.tag;
         writeLog(0,
                  "Generated provider: " + provider.name + " for URL: " +
