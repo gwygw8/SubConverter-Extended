@@ -743,12 +743,9 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   /// check other flags
   ext.authorized = authorized;
   ext.append_proxy_type = argAppendType.get(global.appendType);
-  if ((argTarget == "clash" || argTarget == "clashr") &&
-      argGenClashScript.is_undef())
-    argExpandRulesets.define(true);
-
-  // 默认 expand=false（使用 rule-provider 模式不展开规则集）
-  // 若用户主动传入 expand=true，则允许内联展开规则集
+  // 原项目（SubConverter）默认在 clash 目标下自动把 expand 设为 true
+  // 本项目默认 expand=false（使用 rule-provider 模式不展开规则集）
+  // 若用户主动传入 expand=true，则按照用户意愿内联展开规则集
   argExpandRulesets.define(false);
 
   ext.clash_proxies_style = global.clashProxiesStyle;
