@@ -438,15 +438,43 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
 
                 if(inline_expand && !script)
                 {
-                    // 内联展开模式：直接将规则逐条追加到 rules，附加策略组名
-                    vArray = split(strLine, ",");
-                    if(vArray.size() < 2)
+                    // 内联展开模式：与原版 rulesetToClashStr() 行为完全对齐
+                    // 步骤1：去首尾空白
+                    strLine = trimWhitespace(strLine, true, true);
+                    lineSize = strLine.size();
+                    if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/'))
                         continue;
-                    // 重新组装：规则类型,规则内容,策略组[,no-resolve]
-                    std::string inline_rule = vArray[0] + "," + trim(vArray[1]) + "," + rule_group;
-                    if(vArray.size() > 2)
-                        inline_rule += "," + vArray[2];
-                    rules.emplace_back(std::move(inline_rule));
+                    // 步骤2：过滤不支持的规则类型（ClashRuleTypes 白名单）
+                    if(std::none_of(ClashRuleTypes.begin(), ClashRuleTypes.end(), [&strLine](const std::string& type){ return startsWith(strLine, type); }))
+                        continue;
+                    // 步骤3：剥离行内 // 注释
+                    if(strFind(strLine, "//"))
+                    {
+                        strLine.erase(strLine.find("//"));
+                        strLine = trimWhitespace(strLine);
+                    }
+                    // 步骤4：按规则类型分类处理
+                    // AND/OR/NOT 复合规则：追加 rule_group
+                    if(startsWith(strLine, "AND") || startsWith(strLine, "OR") || startsWith(strLine, "NOT"))
+                    {
+                        rules.emplace_back(strLine + "," + rule_group);
+                    }
+                    // RULE-SET/SUB-RULE：直接写入，不追加 rule_group
+                    else if(startsWith(strLine, "RULE-SET") || startsWith(strLine, "SUB-RULE"))
+                    {
+                        rules.emplace_back(strLine);
+                    }
+                    else
+                    {
+                        // 普通规则：重新组装 类型,内容,策略组[,附加标志]
+                        vArray = split(strLine, ",");
+                        if(vArray.size() < 2)
+                            continue;
+                        std::string inline_rule = vArray[0] + "," + trim(vArray[1]) + "," + rule_group;
+                        if(vArray.size() > 2)
+                            inline_rule += "," + vArray[2];
+                        rules.emplace_back(std::move(inline_rule));
+                    }
                 }
                 else if(startsWith(strLine, "DOMAIN-KEYWORD,"))
                 {
