@@ -1856,7 +1856,10 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS) {
     profile_content = fileGet(name, true);
   } else {
     *status_code = 404;
-    return "Profile not found";
+    return "Profile not found: the requested profile does not exist.\n"
+           "未找到配置：请求的 profile 不存在。\n"
+           "Profile / 配置: " +
+           name;
   }
   // std::cerr<<"Trying to load profile '" + name + "'.\n";
   writeLog(0, "Trying to load profile '" + name + "'.", LOG_LEVEL_INFO);
