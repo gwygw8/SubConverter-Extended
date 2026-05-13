@@ -1647,7 +1647,11 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS) {
   }
   if (!ini.section_exist("Proxy") || !ini.section_exist("Proxy Group") ||
       !ini.section_exist("Rule")) {
-    std::string errmsg = "Incomplete surge config! Missing critical sections!";
+    std::string errmsg =
+        "Invalid request: incomplete Surge configuration.\n"
+        "无效请求：Surge 配置不完整。\n"
+        "Required sections: [Proxy], [Proxy Group], and [Rule].\n"
+        "必须包含以下配置段：[Proxy]、[Proxy Group] 和 [Rule]。";
     // std::cerr<<errmsg<<"\n";
     writeLog(0, errmsg, LOG_LEVEL_ERROR);
     *status_code = 400;
